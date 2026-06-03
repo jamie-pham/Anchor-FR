@@ -87,7 +87,39 @@ router.get('/calculate', async (req: Request, res: Response) => {
   }
 
   req.body = { lat: parsedLat, lng: parsedLng };
-  return router.handle(req, res, () => {});
+
+  // delegate to the POST handler by re-using the same logic inline
+  const userLocation = { lat: parsedLat, lng: parsedLng };
+
+  try {
+    const [fires, earthquakes, weather, tsunamiWarnings] = await Promise.all([
+      fetchNASAFirmsData(userLocation),
+      fetchUSGSEarthquakes(userLocation),
+      fetchECMWFWeather(userLocation),
+      fetchPTWCWarnings(userLocation),
+    ]);
+
+    const scores = {
+      wildfire: calculateWildfireRisk({ fires, weather, userLocation }),
+      earthquake: calculateEarthquakeRisk({ earthquakes, userLocation }),
+      flood: calculateFloodRisk({ weather, userLocation }),
+      storm: calculateStormRisk({ weather, userLocation }),
+      heat: calculateHeatRisk({ weather, userLocation }),
+      tsunami: calculateTsunamiRisk({ warnings: tsunamiWarnings, userLocation }),
+    };
+
+    const overall = getOverallRisk(Object.values(scores));
+
+    return res.json({
+      scores,
+      overall,
+      calculatedAt: new Date().toISOString(),
+      location: userLocation,
+    });
+  } catch (error) {
+    const err = error as Error;
+    return res.status(500).json({ error: 'Failed to calculate risk', message: err.message });
+  }
 });
 
 export default router;
