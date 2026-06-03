@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import * as Notifications from 'expo-notifications';
+import { Platform } from 'react-native';
 import {
   registerForPushNotifications,
   addNotificationReceivedListener,
@@ -11,7 +11,7 @@ import { Coordinates } from '../types';
 export interface PushNotificationState {
   token: string | null;
   permissionGranted: boolean;
-  lastNotification: Notifications.Notification | null;
+  lastNotification: any | null;
   error: string | null;
 }
 
@@ -23,24 +23,23 @@ export function usePushNotifications(location: Coordinates | null) {
     error: null,
   });
 
-  const notificationListener = useRef<Notifications.Subscription | null>(null);
-  const responseListener = useRef<Notifications.Subscription | null>(null);
+  const notificationListener = useRef<any>(null);
+  const responseListener = useRef<any>(null);
 
   useEffect(() => {
+    if (Platform.OS === 'web') return;
+
     let cancelled = false;
 
     async function setup() {
       try {
         const token = await registerForPushNotifications();
         if (cancelled) return;
-
         if (token) {
           setState(prev => ({ ...prev, token, permissionGranted: true }));
-
-          // Register token with backend
           if (location) {
             await registerDevice(token, location.lat, location.lng).catch((err) => {
-              console.warn('[Push] Failed to register device with backend:', err.message);
+              console.warn('[Push] Failed to register device:', err.message);
             });
           }
         } else {
@@ -48,23 +47,18 @@ export function usePushNotifications(location: Coordinates | null) {
         }
       } catch (error) {
         if (cancelled) return;
-        const err = error as Error;
-        setState(prev => ({ ...prev, error: err.message }));
+        setState(prev => ({ ...prev, error: (error as Error).message }));
       }
     }
 
     setup();
 
-    // Listen for foreground notifications
     notificationListener.current = addNotificationReceivedListener((notification) => {
       setState(prev => ({ ...prev, lastNotification: notification }));
     });
 
-    // Listen for user tapping a notification
     responseListener.current = addNotificationResponseListener((response) => {
-      const notification = response.notification;
-      setState(prev => ({ ...prev, lastNotification: notification }));
-      // Navigation handled in _layout.tsx
+      setState(prev => ({ ...prev, lastNotification: response.notification }));
     });
 
     return () => {

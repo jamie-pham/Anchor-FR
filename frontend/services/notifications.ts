@@ -1,26 +1,31 @@
-import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 
-// Configure how notifications are displayed when the app is in the foreground
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: true,
-  }),
-});
+// expo-notifications is not supported on web — guard every import
+const isNative = Platform.OS !== 'web';
 
-export interface NotificationChannels {
-  highRisk: string;
-  mediumRisk: string;
-  lowRisk: string;
+async function getNotifications() {
+  if (!isNative) return null;
+  return import('expo-notifications');
 }
 
-/**
- * Set up Android notification channels
- */
+// Set up foreground handler on native only
+if (isNative) {
+  getNotifications().then((Notifications) => {
+    if (!Notifications) return;
+    Notifications.setNotificationHandler({
+      handleNotification: async () => ({
+        shouldShowAlert: true,
+        shouldPlaySound: true,
+        shouldSetBadge: true,
+      }),
+    });
+  });
+}
+
 export async function setupNotificationChannels(): Promise<void> {
   if (Platform.OS !== 'android') return;
+  const Notifications = await getNotifications();
+  if (!Notifications) return;
 
   await Notifications.setNotificationChannelAsync('anchor-high-risk', {
     name: 'High Risk Alerts',
@@ -49,14 +54,12 @@ export async function setupNotificationChannels(): Promise<void> {
   });
 }
 
-/**
- * Request notification permissions and return the Expo push token
- */
 export async function registerForPushNotifications(): Promise<string | null> {
-  // Set up channels first (Android)
+  const Notifications = await getNotifications();
+  if (!Notifications) return null;
+
   await setupNotificationChannels();
 
-  // Check existing permission
   const { status: existingStatus } = await Notifications.getPermissionsAsync();
   let finalStatus = existingStatus;
 
@@ -65,77 +68,64 @@ export async function registerForPushNotifications(): Promise<string | null> {
     finalStatus = status;
   }
 
-  if (finalStatus !== 'granted') {
-    console.warn('[Notifications] Permission not granted');
-    return null;
-  }
+  if (finalStatus !== 'granted') return null;
 
   try {
     const tokenData = await Notifications.getExpoPushTokenAsync({
       projectId: process.env.EXPO_PUBLIC_PROJECT_ID,
     });
     return tokenData.data;
-  } catch (error) {
-    console.error('[Notifications] Failed to get push token:', error);
+  } catch {
     return null;
   }
 }
 
-/**
- * Schedule a local notification (for testing / offline scenarios)
- */
 export async function scheduleLocalNotification(
   title: string,
   body: string,
   data?: Record<string, unknown>,
   delaySeconds = 1
-): Promise<string> {
-  const id = await Notifications.scheduleNotificationAsync({
-    content: {
-      title,
-      body,
-      data,
-      sound: 'default',
-    },
-    trigger: { seconds: delaySeconds },
+): Promise<string | null> {
+  const Notifications = await getNotifications();
+  if (!Notifications) return null;
+  return Notifications.scheduleNotificationAsync({
+    content: { title, body, data, sound: 'default' },
+    trigger: { seconds: delaySeconds } as any,
   });
-  return id;
 }
 
-/**
- * Cancel all scheduled notifications
- */
 export async function cancelAllNotifications(): Promise<void> {
+  const Notifications = await getNotifications();
+  if (!Notifications) return;
   await Notifications.cancelAllScheduledNotificationsAsync();
 }
 
-/**
- * Get all delivered (received) notifications
- */
-export async function getDeliveredNotifications(): Promise<Notifications.Notification[]> {
+export async function getDeliveredNotifications(): Promise<any[]> {
+  const Notifications = await getNotifications();
+  if (!Notifications) return [];
   return Notifications.getPresentedNotificationsAsync();
 }
 
-/**
- * Clear all delivered notifications from the tray
- */
 export async function clearAllDeliveredNotifications(): Promise<void> {
+  const Notifications = await getNotifications();
+  if (!Notifications) return;
   await Notifications.dismissAllNotificationsAsync();
 }
 
-export type NotificationListener = (notification: Notifications.Notification) => void;
-export type ResponseListener = (response: Notifications.NotificationResponse) => void;
-
-/**
- * Add a listener for incoming notifications while app is foregrounded
- */
-export function addNotificationReceivedListener(listener: NotificationListener): Notifications.Subscription {
-  return Notifications.addNotificationReceivedListener(listener);
+export function addNotificationReceivedListener(listener: (n: any) => void): any {
+  if (!isNative) return { remove: () => {} };
+  let sub: any = null;
+  getNotifications().then((N) => {
+    if (N) sub = N.addNotificationReceivedListener(listener);
+  });
+  return { remove: () => sub?.remove() };
 }
 
-/**
- * Add a listener for when the user taps a notification
- */
-export function addNotificationResponseListener(listener: ResponseListener): Notifications.Subscription {
-  return Notifications.addNotificationResponseReceivedListener(listener);
+export function addNotificationResponseListener(listener: (r: any) => void): any {
+  if (!isNative) return { remove: () => {} };
+  let sub: any = null;
+  getNotifications().then((N) => {
+    if (N) sub = N.addNotificationResponseReceivedListener(listener);
+  });
+  return { remove: () => sub?.remove() };
 }
